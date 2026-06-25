@@ -174,12 +174,7 @@ def filler_signal(text):
     text_lower = text.lower()
     word_count = max(len(text.split()), 1)
 
-    # Count how many filler phrases appear
     hits = sum(1 for phrase in filler_phrases if phrase in text_lower)
-
-    # Normalize by word count — more hits per word = more AI-like
-    # A single hit in a short text is significant; scale up to ~3 hits per
-    # 100 words as the maximum before clamping to 1.0
     density = hits / (word_count / 100)
     score = max(0.0, min(1.0, density / 3.0))
     return round(score, 4)
@@ -210,8 +205,15 @@ def get_attribution(confidence):
 
 # ── Transparency label generator ───────────────────────────────────
 
-def generate_label(attribution, confidence):
+def generate_label(attribution, confidence, certified=False):
     pct = round(confidence * 100)
+
+    if certified:
+        return (
+            f"✓ Verified Human-Written — "
+            f"This content has been verified by the creator and our analysis "
+            f"supports human authorship (confidence: {pct}%)."
+        )
 
     if attribution == "likely_ai" and confidence >= 0.75:
         return (
@@ -380,13 +382,22 @@ def verify():
     entries[idx]["provenance_certificate"] = certificate
     write_log(entries)
 
+    # Generate the distinct verified label
+    updated_label = generate_label(
+        entries[idx]["attribution"],
+        entries[idx]["confidence"],
+        certified=True
+    )
+
     return jsonify({
         "content_id": content_id,
         "badge": "✓ Verified Human-Written",
         "issued_at": certificate["issued_at"],
         "message": "Your provenance certificate has been issued and attached to this content.",
         "certificate": certificate,
+        "label": updated_label,
     })
+
 
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
@@ -399,21 +410,17 @@ def dashboard():
         avg_confidence = 0.0
         cert_rate = 0.0
     else:
-        # Attribution breakdown
         counts = {"likely_ai": 0, "uncertain": 0, "likely_human": 0}
         for e in entries:
             counts[e["attribution"]] = counts.get(e["attribution"], 0) + 1
 
-        # Appeal rate
         appeals = sum(1 for e in entries if e.get("appeal_reasoning"))
         appeal_rate = round(appeals / total * 100, 1)
 
-        # Average confidence
         avg_confidence = round(
             sum(e["confidence"] for e in entries) / total, 4
         )
 
-        # Certificate rate (bonus metric)
         certified = sum(
             1 for e in entries if e.get("provenance_certificate")
         )
@@ -474,7 +481,7 @@ def dashboard():
             letter-spacing: 0.05em;
         }}
 
-        .card.ai .value   {{ color: #e05252; }}
+        .card.ai .value    {{ color: #e05252; }}
         .card.human .value {{ color: #3aaa6e; }}
         .card.uncertain .value {{ color: #e09a2f; }}
         .card.neutral .value {{ color: #4a6fa5; }}
@@ -511,8 +518,8 @@ def dashboard():
             border-radius: 99px;
         }}
 
-        .bar-fill.ai       {{ background: #e05252; }}
-        .bar-fill.human    {{ background: #3aaa6e; }}
+        .bar-fill.ai        {{ background: #e05252; }}
+        .bar-fill.human     {{ background: #3aaa6e; }}
         .bar-fill.uncertain {{ background: #e09a2f; }}
 
         .bar-pct {{
