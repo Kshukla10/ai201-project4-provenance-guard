@@ -11,6 +11,9 @@ the system updates the content status to "under_review" and logs the appeal.
 
 ## Architecture Diagram
 
+P## Architecture Diagram
+
+```
 POST /submit
     │
     ├──► [Signal 1: Groq LLM] ──────────► llm_score (0.0–1.0)
@@ -36,7 +39,7 @@ POST /appeal
     ├──► update status → "under_review"
     ├──► append appeal_reasoning to log entry
     └──► return confirmation
-
+```
 ## Detection Signals
 
 ### Signal 1 — Groq LLM Classification
