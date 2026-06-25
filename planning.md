@@ -137,3 +137,30 @@ mislabeling a human as AI is the worse error on a writing platform.
 - **Provide to AI:** Label variants + appeals workflow + diagram
 - **Ask for:** Label generation function + POST /appeal endpoint
 - **Verify:** Confirm all label variants are reachable; test appeal updates status
+
+## Stretch Features
+
+### Stretch 1 — Ensemble Detection
+Adding a third signal: filler phrase detection. AI writing frequently uses
+transitional filler phrases like "it is important to note", "furthermore",
+"in conclusion", "it is worth mentioning", "in today's world". Human writing
+uses these far less predictably.
+
+- **Output:** A float from 0.0 (human) to 1.0 (AI)
+- **Weight:** llm_score × 0.5, stylo_score × 0.3, filler_score × 0.2
+- **Why:** Completely independent from both existing signals — one is semantic,
+  one is structural, this one is lexical pattern matching.
+
+### Stretch 2 — Provenance Certificate
+Creators can earn a "verified human" credential by submitting a
+POST /verify endpoint with their content_id and a verification_statement.
+The certificate is stored in the audit log entry and returned in future
+GET /log responses. It is only available for content with attribution of
+likely_human or uncertain — not for likely_ai content.
+
+### Stretch 3 — Analytics Dashboard
+A GET /dashboard endpoint returns a simple HTML page showing:
+- Total submissions
+- Attribution breakdown (likely_ai / uncertain / likely_human counts + %)
+- Appeal rate (appeals filed / total submissions)
+- Average confidence score across all submissions
