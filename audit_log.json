@@ -164,5 +164,31 @@
     "stylo_score": 0.5,
     "status": "classified",
     "appeal_reasoning": null
+  },
+  {
+    "content_id": "fea4f9e2-fcda-421c-a8e1-bac9ab1c3b2c",
+    "creator_id": "test-user-1",
+    "timestamp": "2026-06-25T14:34:04.755605+00:00",
+    "attribution": "likely_ai",
+    "confidence": 0.7351,
+    "llm_score": 0.8,
+    "stylo_score": 0.4505,
+    "filler_score": 1.0,
+    "status": "classified",
+    "appeal_reasoning": null,
+    "provenance_certificate": null
+  },
+  {
+    "content_id": "f25f7a1e-de00-4fb0-877c-bb45cf2bf0b8",
+    "creator_id": "test-user-2",
+    "timestamp": "2026-06-25T14:34:13.785702+00:00",
+    "attribution": "likely_human",
+    "confidence": 0.1659,
+    "llm_score": 0.1,
+    "stylo_score": 0.3865,
+    "filler_score": 0.0,
+    "status": "classified",
+    "appeal_reasoning": null,
+    "provenance_certificate": null
   }
 ]

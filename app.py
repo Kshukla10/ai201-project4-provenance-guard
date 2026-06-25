@@ -128,10 +128,75 @@ def stylo_signal(text):
     return round(stylo_score, 4)
 
 
+# ── Signal 3: Filler phrase detection ─────────────────────────────
+
+def filler_signal(text):
+    """
+    Detects AI-characteristic filler and transitional phrases.
+    Returns a float from 0.0 (human) to 1.0 (AI).
+    """
+    filler_phrases = [
+        "it is important to note",
+        "it is worth mentioning",
+        "it is worth noting",
+        "furthermore",
+        "in conclusion",
+        "in today's world",
+        "in the modern world",
+        "it is essential to",
+        "it is crucial to",
+        "one must consider",
+        "it goes without saying",
+        "needless to say",
+        "as previously mentioned",
+        "in summary",
+        "to summarize",
+        "on the other hand",
+        "it should be noted",
+        "in this day and age",
+        "at the end of the day",
+        "when it comes to",
+        "it is imperative",
+        "a wide range of",
+        "a variety of",
+        "in terms of",
+        "it is undeniable",
+        "there is no doubt",
+        "plays a crucial role",
+        "plays an important role",
+        "delve into",
+        "dive into",
+        "in the realm of",
+        "it is fascinating",
+        "it is interesting to note",
+    ]
+
+    text_lower = text.lower()
+    word_count = max(len(text.split()), 1)
+
+    # Count how many filler phrases appear
+    hits = sum(1 for phrase in filler_phrases if phrase in text_lower)
+
+    # Normalize by word count — more hits per word = more AI-like
+    # A single hit in a short text is significant; scale up to ~3 hits per
+    # 100 words as the maximum before clamping to 1.0
+    density = hits / (word_count / 100)
+    score = max(0.0, min(1.0, density / 3.0))
+    return round(score, 4)
+
+
 # ── Confidence scorer ──────────────────────────────────────────────
 
-def compute_confidence(llm_score, stylo_score):
-    return round((llm_score * 0.6) + (stylo_score * 0.4), 4)
+def compute_confidence(llm_score, stylo_score, filler_score):
+    """
+    Combines all three signals into a single confidence score.
+    LLM: 50%, Stylometrics: 30%, Filler phrases: 20%
+    Returns a float from 0.0 (human) to 1.0 (AI).
+    """
+    return round(
+        (llm_score * 0.5) + (stylo_score * 0.3) + (filler_score * 0.2),
+        4
+    )
 
 
 def get_attribution(confidence):
@@ -204,9 +269,13 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
+    # All three signals
     llm_score = groq_signal(text)
     stylo_score = stylo_signal(text)
-    confidence = compute_confidence(llm_score, stylo_score)
+    filler_score = filler_signal(text)
+
+    # Combined confidence
+    confidence = compute_confidence(llm_score, stylo_score, filler_score)
     attribution = get_attribution(confidence)
     label = generate_label(attribution, confidence)
 
@@ -218,8 +287,10 @@ def submit():
         "confidence": confidence,
         "llm_score": llm_score,
         "stylo_score": stylo_score,
+        "filler_score": filler_score,
         "status": "classified",
         "appeal_reasoning": None,
+        "provenance_certificate": None,
     }
     append_entry(entry)
 
@@ -228,6 +299,11 @@ def submit():
         "attribution": attribution,
         "confidence": confidence,
         "label": label,
+        "signals": {
+            "llm_score": llm_score,
+            "stylo_score": stylo_score,
+            "filler_score": filler_score,
+        }
     })
 
 
