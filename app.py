@@ -1,6 +1,8 @@
 import os
 import uuid
 import json
+import re
+import math
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -82,6 +84,77 @@ Text to analyze:
     return max(0.0, min(1.0, score))  # clamp to [0, 1]
 
 
+# ── Signal 2: Stylometric heuristics ──────────────────────────────
+
+def stylo_signal(text):
+    """
+    Measures structural/statistical properties of the text.
+    Returns a float from 0.0 (human) to 1.0 (AI).
+    AI text tends to be more uniform; human text more variable.
+    """
+    # Split into sentences
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if len(sentences) < 2:
+        return 0.5  # not enough data, return uncertain
+
+    # --- Metric 1: Sentence length variance ---
+    # AI text tends to have similar sentence lengths
+    lengths = [len(s.split()) for s in sentences]
+    mean_len = sum(lengths) / len(lengths)
+    variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
+    std_dev = math.sqrt(variance)
+
+    # Low std_dev = uniform = more AI-like
+    # Normalize: std_dev of 8+ is very human, 2 or less is very AI
+    length_score = max(0.0, min(1.0, 1.0 - (std_dev / 8.0)))
+
+    # --- Metric 2: Type-token ratio (vocabulary diversity) ---
+    words = re.findall(r'\b[a-z]+\b', text.lower())
+    if len(words) == 0:
+        return 0.5
+    ttr = len(set(words)) / len(words)
+
+    # High TTR = diverse vocabulary = more human
+    # Normalize: TTR > 0.8 is very human, < 0.5 is more AI-like
+    ttr_score = max(0.0, min(1.0, 1.0 - ((ttr - 0.5) / 0.3)))
+
+    # --- Metric 3: Punctuation density ---
+    # Human writing uses more varied punctuation
+    punct_chars = set('",;:—–()[]{}\'\"')
+    punct_count = sum(1 for c in text if c in punct_chars)
+    punct_density = punct_count / max(len(text), 1)
+
+    # Low punctuation density = more AI-like
+    # Normalize: density > 0.05 is human-like, < 0.01 is AI-like
+    punct_score = max(0.0, min(1.0, 1.0 - (punct_density / 0.05)))
+
+    # Combine three metrics equally
+    stylo_score = (length_score + ttr_score + punct_score) / 3.0
+    return round(stylo_score, 4)
+
+
+# ── Confidence scorer ──────────────────────────────────────────────
+
+def compute_confidence(llm_score, stylo_score):
+    """
+    Combines both signals into a single confidence score.
+    LLM gets 60% weight, stylometrics 40%.
+    Returns a float from 0.0 (human) to 1.0 (AI).
+    """
+    return round((llm_score * 0.6) + (stylo_score * 0.4), 4)
+
+
+def get_attribution(confidence):
+    if confidence >= 0.65:
+        return "likely_ai"
+    elif confidence <= 0.35:
+        return "likely_human"
+    else:
+        return "uncertain"
+
+
 # ── Routes ─────────────────────────────────────────────────────────
 
 @app.route("/submit", methods=["POST"])
@@ -100,12 +173,13 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    # Signal 1 only for now (Signal 2 added in Milestone 4)
+    # Both signals
     llm_score = groq_signal(text)
+    stylo_score = stylo_signal(text)
 
-    # Placeholder confidence and label until M4
-    confidence = round(llm_score, 4)
-    attribution = "likely_ai" if confidence >= 0.65 else ("likely_human" if confidence <= 0.35 else "uncertain")
+    # Combined confidence
+    confidence = compute_confidence(llm_score, stylo_score)
+    attribution = get_attribution(confidence)
     label = f"[Placeholder label — confidence {confidence}]"
 
     entry = {
@@ -115,7 +189,7 @@ def submit():
         "attribution": attribution,
         "confidence": confidence,
         "llm_score": llm_score,
-        "stylo_score": None,
+        "stylo_score": stylo_score,
         "status": "classified",
         "appeal_reasoning": None,
     }
@@ -132,7 +206,7 @@ def submit():
 @app.route("/log", methods=["GET"])
 def get_log():
     entries = read_log()
-    return jsonify({"entries": entries[-20:]})  # return last 20
+    return jsonify({"entries": entries[-20:]})
 
 
 if __name__ == "__main__":

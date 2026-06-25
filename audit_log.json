@@ -9,5 +9,27 @@
     "stylo_score": null,
     "status": "classified",
     "appeal_reasoning": null
+  },
+  {
+    "content_id": "82ebc679-7745-45af-8110-897e5e4ec584",
+    "creator_id": "test-user-1",
+    "timestamp": "2026-06-25T14:03:02.069008+00:00",
+    "attribution": "likely_ai",
+    "confidence": 0.6674,
+    "llm_score": 0.8,
+    "stylo_score": 0.4684,
+    "status": "classified",
+    "appeal_reasoning": null
+  },
+  {
+    "content_id": "ad139821-90f1-4dca-88bc-615a6fd7ce44",
+    "creator_id": "test-user-2",
+    "timestamp": "2026-06-25T14:03:25.406761+00:00",
+    "attribution": "likely_human",
+    "confidence": 0.2146,
+    "llm_score": 0.1,
+    "stylo_score": 0.3865,
+    "status": "classified",
+    "appeal_reasoning": null
   }
 ]
