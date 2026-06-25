@@ -1,4 +1,3 @@
-
 # Provenance Guard
 
 A content attribution API that detects whether a piece of writing was authored
@@ -17,14 +16,16 @@ A submitted piece of text travels through the following path:
 3. **Signal 2 (Stylometrics)** computes three structural metrics — sentence
    length variance, type-token ratio, and punctuation density — and combines
    them into a single score (0.0–1.0)
-4. **Confidence scorer** combines both signals into a weighted score:
-   `confidence = (llm_score × 0.6) + (stylo_score × 0.4)`
-5. **Label generator** maps the confidence score to a plain-language
+4. **Signal 3 (Filler Phrases)** detects AI-characteristic transitional phrases
+   and normalizes their density into a score (0.0–1.0)
+5. **Confidence scorer** combines all three signals into a weighted score:
+   `confidence = (llm_score × 0.5) + (stylo_score × 0.3) + (filler_score × 0.2)`
+6. **Label generator** maps the confidence score to a plain-language
    transparency label
-6. **Audit log** writes a structured entry with all scores, attribution,
+7. **Audit log** writes a structured entry with all scores, attribution,
    and status
-7. **JSON response** is returned to the caller with content_id, attribution,
-   confidence, and label
+8. **JSON response** is returned to the caller with content_id, attribution,
+   confidence, label, and all three signal scores
 
 If a creator disputes the result:
 1. **POST /appeal** receives content_id and creator_reasoning
@@ -36,7 +37,7 @@ If a creator disputes the result:
 
 ## Detection Signals
 
-### Signal 1 — Groq LLM Classification (weight: 60%)
+### Signal 1 — Groq LLM Classification (weight: 50%)
 **What it measures:** Whether the text reads as AI or human holistically —
 tone, phrasing patterns, semantic coherence, and stylistic consistency.
 The model is prompted to return a structured JSON score between 0.0 and 1.0.
@@ -49,7 +50,7 @@ available without training a custom model.
 can fool it. It also has no memory of what "typical" human writing looks like
 across a corpus — it reasons from general knowledge only.
 
-### Signal 2 — Stylometric Heuristics (weight: 40%)
+### Signal 2 — Stylometric Heuristics (weight: 30%)
 **What it measures:** Three structural/statistical properties:
 - **Sentence length variance:** AI text tends toward uniform sentence lengths;
   human text is more irregular
@@ -66,16 +67,31 @@ either alone.
 appears structurally uniform and may score as AI-like. Non-native English
 speakers who write carefully may also score higher than expected.
 
+### Signal 3 — Filler Phrase Detection (weight: 20%)
+**What it measures:** The density of AI-characteristic transitional and filler
+phrases such as "it is important to note", "furthermore", "in conclusion",
+"delve into", and "plays a crucial role". AI writing uses these phrases far
+more predictably than human writing.
+
+**Why I chose it:** Completely independent from both other signals — one is
+semantic, one is structural, this one is lexical pattern matching. Each signal
+captures a genuinely different property of the text.
+
+**What it misses:** Human writers who have absorbed formal writing conventions
+may use these phrases naturally. Academic writers in particular may trigger
+false positives on this signal.
+
 ---
 
 ## Confidence Scoring
 
 Signals are combined with a weighted average:
-confidence = (llm_score × 0.6) + (stylo_score × 0.4)
+confidence = (llm_score × 0.5) + (stylo_score × 0.3) + (filler_score × 0.2)
 
-The LLM signal receives higher weight because semantic analysis is harder
-to fool than structural metrics. Stylometrics alone would misfire on formal
-human writing too often.
+The LLM signal receives the highest weight because semantic analysis is harder
+to fool than structural or lexical metrics. Stylometrics get the second highest
+weight as a strong structural check. Filler phrases get the lowest weight
+because they can occasionally misfire on formal human writing.
 
 ### Score thresholds
 
@@ -91,23 +107,25 @@ requires a confidence of 0.65 before calling something AI, not just 0.5.
 
 ### Example submissions with different confidence scores
 
-**High-confidence AI text (confidence: 0.6674)**
+**High-confidence AI text (confidence: 0.7351)**
 Text: "Artificial intelligence represents a transformative paradigm shift in
 
 modern society. It is important to note that while the benefits are numerous,
 
-stakeholders must collaborate to ensure responsible deployment."
-llm_score: 0.80 | stylo_score: 0.4684 | confidence: 0.6674
+stakeholders must collaborate to ensure responsible deployment. Furthermore,
+
+it is crucial to consider the ethical implications."
+llm_score: 0.80 | stylo_score: 0.4505 | filler_score: 1.0 | confidence: 0.7351
 
 attribution: likely_ai
 
-**High-confidence human text (confidence: 0.2146)**
+**High-confidence human text (confidence: 0.1659)**
 Text: "ok so i finally tried that new ramen place downtown and honestly?
 
 underwhelming. the broth was fine but they put WAY too much sodium in it
 
 and i was thirsty for like three hours after."
-llm_score: 0.10 | stylo_score: 0.3865 | confidence: 0.2146
+llm_score: 0.10 | stylo_score: 0.3865 | filler_score: 0.0 | confidence: 0.1659
 
 attribution: likely_human
 
@@ -116,7 +134,7 @@ attribution: likely_human
 ## Transparency Label Variants
 
 The label shown to a reader changes based on the confidence score.
-All three variants are reachable through different inputs.
+All variants are reachable through different inputs.
 
 ### High-confidence AI (confidence ≥ 0.75)
 > **AI-Generated Content**
@@ -160,8 +178,8 @@ with their content_id and a plain-language explanation.
 - Returns a confirmation
 
 **What a human reviewer sees:**
-The full audit log entry — original llm_score, stylo_score, confidence,
-attribution, timestamp, and the creator's reasoning side by side.
+The full audit log entry — original llm_score, stylo_score, filler_score,
+confidence, attribution, timestamp, and the creator's reasoning side by side.
 
 Automated re-classification is not implemented. Appeals are reviewed by humans.
 
@@ -216,9 +234,11 @@ Every attribution decision is written to `audit_log.json`. Each entry captures:
 - `confidence` — combined weighted score
 - `llm_score` — Signal 1 output
 - `stylo_score` — Signal 2 output
+- `filler_score` — Signal 3 output
 - `status` — classified / under_review
 - `appeal_reasoning` — populated if an appeal was filed
 - `appeal_timestamp` — when the appeal was submitted
+- `provenance_certificate` — populated if a certificate was issued
 
 Sample entries are visible via GET /log. Example output:
 
@@ -228,40 +248,132 @@ Sample entries are visible via GET /log. Example output:
     {
       "appeal_reasoning": null,
       "attribution": "likely_ai",
-      "confidence": 0.6674,
-      "content_id": "82ebc679-7745-45af-8110-897e5e4ec584",
+      "confidence": 0.7351,
+      "content_id": "fea4f9e2-fcda-421c-a8e1-bac9ab1c3b2c",
       "creator_id": "test-user-1",
+      "filler_score": 1.0,
       "llm_score": 0.8,
+      "provenance_certificate": null,
       "status": "classified",
-      "stylo_score": 0.4684,
-      "timestamp": "2026-06-25T14:03:02.069008+00:00"
+      "stylo_score": 0.4505,
+      "timestamp": "2026-06-25T14:30:00.000000+00:00"
     },
     {
       "appeal_reasoning": null,
       "attribution": "likely_human",
-      "confidence": 0.2146,
-      "content_id": "ad139821-90f1-4dca-88bc-615a6fd7ce44",
+      "confidence": 0.1659,
+      "content_id": "f25f7a1e-de00-4fb0-877c-bb45cf2bf0b8",
       "creator_id": "test-user-2",
+      "filler_score": 0.0,
       "llm_score": 0.1,
+      "provenance_certificate": {
+        "badge": "✓ Verified Human-Written",
+        "certified": true,
+        "issued_at": "2026-06-25T14:37:24.612343+00:00",
+        "verification_statement": "I wrote this from my own personal experience."
+      },
       "status": "classified",
       "stylo_score": 0.3865,
-      "timestamp": "2026-06-25T14:03:25.406761+00:00"
+      "timestamp": "2026-06-25T14:31:00.000000+00:00"
     },
     {
-      "appeal_reasoning": "I wrote this myself from personal experience. I am a non-native English speaker and my writing style may appear more formal than typical.",
+      "appeal_reasoning": "I wrote this myself. I am a non-native English speaker and my writing style may appear more formal than typical.",
       "appeal_timestamp": "2026-06-25T14:13:50.780085+00:00",
       "attribution": "likely_ai",
-      "confidence": 0.6674,
+      "confidence": 0.7351,
       "content_id": "eb621a9d-114b-44df-9db0-7bddbb1f5917",
       "creator_id": "test-user-1",
+      "filler_score": 1.0,
       "llm_score": 0.8,
+      "provenance_certificate": null,
       "status": "under_review",
-      "stylo_score": 0.4684,
+      "stylo_score": 0.4505,
       "timestamp": "2026-06-25T14:11:05.921050+00:00"
     }
   ]
 }
 ```
+
+---
+
+## Stretch Features
+
+### Ensemble Detection (3 Signals)
+
+Added a third signal — filler phrase detection — to the detection pipeline.
+
+**What it measures:** The density of AI-characteristic transitional and filler
+phrases such as "it is important to note", "furthermore", "in conclusion",
+"delve into", and "plays a crucial role". AI writing uses these phrases far
+more predictably than human writing.
+
+**Output:** A float from 0.0 (human) to 1.0 (AI), normalized by word count.
+
+**Updated weighting:**
+| Signal | Weight |
+|--------|--------|
+| LLM (Groq) | 50% |
+| Stylometrics | 30% |
+| Filler phrases | 20% |
+
+**Example — AI text with filler phrases:**
+filler_score: 1.0 | llm_score: 0.80 | stylo_score: 0.45 | confidence: 0.7351
+
+**Example — Human text with no filler phrases:**
+filler_score: 0.0 | llm_score: 0.10 | stylo_score: 0.39 | confidence: 0.1659
+
+---
+
+### Provenance Certificate
+
+Creators can earn a "Verified Human-Written" badge on their content by
+submitting a POST /verify request with their content_id and a
+verification_statement explaining their authorship.
+
+**How it works:**
+- Only available for content attributed as `likely_human` or `uncertain`
+- `likely_ai` content is blocked with a 403 — the creator must appeal first
+- The certificate is stored in the audit log entry and returned in the response
+- The badge reads: **✓ Verified Human-Written**
+
+**Endpoint:** `POST /verify`
+```json
+{
+  "content_id": "your-content-id",
+  "verification_statement": "I wrote this from personal experience."
+}
+```
+
+**Response:**
+```json
+{
+  "badge": "✓ Verified Human-Written",
+  "issued_at": "2026-06-25T14:37:24.612343+00:00",
+  "message": "Your provenance certificate has been issued and attached to this content."
+}
+```
+
+---
+
+### Analytics Dashboard
+
+A visual dashboard available at `GET /dashboard` showing all-time detection
+statistics drawn live from the audit log.
+
+**Metrics displayed:**
+- Total submissions
+- Likely AI / Likely Human / Uncertain counts
+- Appeal rate (% of submissions that received an appeal)
+- Average confidence score across all submissions
+- Provenance certificate rate (% of submissions that earned a certificate)
+- Attribution breakdown as a visual bar chart
+
+**How to view:** Run the server and open `http://localhost:5000/dashboard`
+in your browser.
+
+**Dashboard preview:**
+
+![Analytics Dashboard](images/dashboard.png)
 
 ---
 
@@ -315,5 +427,3 @@ density. The AI produced a working function but combined the three metrics with
 equal weights and no normalization bounds, meaning scores could exceed 1.0 on
 extreme inputs. I added explicit clamping with max(0.0, min(1.0, ...)) on each
 metric and tested the function on four inputs before wiring it into the endpoint.
-
----
