@@ -11,8 +11,6 @@ the system updates the content status to "under_review" and logs the appeal.
 
 ## Architecture Diagram
 
-P## Architecture Diagram
-
 ```
 POST /submit
     │
