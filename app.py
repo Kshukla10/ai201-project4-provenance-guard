@@ -388,5 +388,231 @@ def verify():
         "certificate": certificate,
     })
 
+@app.route("/dashboard", methods=["GET"])
+def dashboard():
+    entries = read_log()
+
+    total = len(entries)
+    if total == 0:
+        counts = {"likely_ai": 0, "uncertain": 0, "likely_human": 0}
+        appeal_rate = 0.0
+        avg_confidence = 0.0
+        cert_rate = 0.0
+    else:
+        # Attribution breakdown
+        counts = {"likely_ai": 0, "uncertain": 0, "likely_human": 0}
+        for e in entries:
+            counts[e["attribution"]] = counts.get(e["attribution"], 0) + 1
+
+        # Appeal rate
+        appeals = sum(1 for e in entries if e.get("appeal_reasoning"))
+        appeal_rate = round(appeals / total * 100, 1)
+
+        # Average confidence
+        avg_confidence = round(
+            sum(e["confidence"] for e in entries) / total, 4
+        )
+
+        # Certificate rate (bonus metric)
+        certified = sum(
+            1 for e in entries if e.get("provenance_certificate")
+        )
+        cert_rate = round(certified / total * 100, 1)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Provenance Guard — Analytics Dashboard</title>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f4f5f7;
+            color: #1a1a2e;
+            padding: 40px 20px;
+        }}
+
+        h1 {{
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }}
+
+        .subtitle {{
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 36px;
+        }}
+
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 36px;
+        }}
+
+        .card {{
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }}
+
+        .card .value {{
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }}
+
+        .card .label {{
+            font-size: 0.82rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+
+        .card.ai .value   {{ color: #e05252; }}
+        .card.human .value {{ color: #3aaa6e; }}
+        .card.uncertain .value {{ color: #e09a2f; }}
+        .card.neutral .value {{ color: #4a6fa5; }}
+
+        .section-title {{
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }}
+
+        .bar-row {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }}
+
+        .bar-label {{
+            width: 120px;
+            font-size: 0.85rem;
+            color: #444;
+        }}
+
+        .bar-track {{
+            flex: 1;
+            background: #eee;
+            border-radius: 99px;
+            height: 10px;
+            overflow: hidden;
+        }}
+
+        .bar-fill {{
+            height: 100%;
+            border-radius: 99px;
+        }}
+
+        .bar-fill.ai       {{ background: #e05252; }}
+        .bar-fill.human    {{ background: #3aaa6e; }}
+        .bar-fill.uncertain {{ background: #e09a2f; }}
+
+        .bar-pct {{
+            font-size: 0.82rem;
+            color: #888;
+            width: 40px;
+            text-align: right;
+        }}
+
+        .footer {{
+            margin-top: 40px;
+            font-size: 0.78rem;
+            color: #aaa;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <h1>Provenance Guard</h1>
+    <p class="subtitle">Analytics Dashboard — all-time statistics</p>
+
+    <div class="grid">
+        <div class="card neutral">
+            <div class="value">{total}</div>
+            <div class="label">Total Submissions</div>
+        </div>
+        <div class="card ai">
+            <div class="value">{counts['likely_ai']}</div>
+            <div class="label">Likely AI</div>
+        </div>
+        <div class="card human">
+            <div class="value">{counts['likely_human']}</div>
+            <div class="label">Likely Human</div>
+        </div>
+        <div class="card uncertain">
+            <div class="value">{counts['uncertain']}</div>
+            <div class="label">Uncertain</div>
+        </div>
+        <div class="card neutral">
+            <div class="value">{appeal_rate}%</div>
+            <div class="label">Appeal Rate</div>
+        </div>
+        <div class="card neutral">
+            <div class="value">{avg_confidence}</div>
+            <div class="label">Avg Confidence Score</div>
+        </div>
+        <div class="card human">
+            <div class="value">{cert_rate}%</div>
+            <div class="label">Provenance Certified</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <p class="section-title">Attribution Breakdown</p>
+
+        <div class="bar-row">
+            <div class="bar-label">Likely AI</div>
+            <div class="bar-track">
+                <div class="bar-fill ai"
+                     style="width: {round(counts['likely_ai'] / max(total,1) * 100, 1)}%">
+                </div>
+            </div>
+            <div class="bar-pct">
+                {round(counts['likely_ai'] / max(total,1) * 100, 1)}%
+            </div>
+        </div>
+
+        <div class="bar-row">
+            <div class="bar-label">Likely Human</div>
+            <div class="bar-track">
+                <div class="bar-fill human"
+                     style="width: {round(counts['likely_human'] / max(total,1) * 100, 1)}%">
+                </div>
+            </div>
+            <div class="bar-pct">
+                {round(counts['likely_human'] / max(total,1) * 100, 1)}%
+            </div>
+        </div>
+
+        <div class="bar-row">
+            <div class="bar-label">Uncertain</div>
+            <div class="bar-track">
+                <div class="bar-fill uncertain"
+                     style="width: {round(counts['uncertain'] / max(total,1) * 100, 1)}%">
+                </div>
+            </div>
+            <div class="bar-pct">
+                {round(counts['uncertain'] / max(total,1) * 100, 1)}%
+            </div>
+        </div>
+    </div>
+
+    <p class="footer">
+        Provenance Guard &mdash; data sourced from audit_log.json
+    </p>
+</body>
+</html>"""
+
+    return html
+
+
 if __name__ == "__main__":
     app.run(debug=True)
