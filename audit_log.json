@@ -189,6 +189,11 @@
     "filler_score": 0.0,
     "status": "classified",
     "appeal_reasoning": null,
-    "provenance_certificate": null
+    "provenance_certificate": {
+      "certified": true,
+      "issued_at": "2026-06-25T14:37:24.612343+00:00",
+      "verification_statement": "I wrote this from my own personal experience visiting the restaurant. This is my original work.",
+      "badge": "\u2713 Verified Human-Written"
+    }
   }
 ]

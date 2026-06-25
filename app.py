@@ -343,5 +343,50 @@ def get_log():
     return jsonify({"entries": entries[-20:]})
 
 
+@app.route("/verify", methods=["POST"])
+def verify():
+    data = request.get_json()
+
+    if not data or "content_id" not in data or "verification_statement" not in data:
+        return jsonify({"error": "Request must include 'content_id' and 'verification_statement'"}), 400
+
+    content_id = data["content_id"]
+    statement = data["verification_statement"].strip()
+
+    if not statement:
+        return jsonify({"error": "verification_statement cannot be empty"}), 400
+
+    idx, entries = find_entry(content_id)
+
+    if idx is None:
+        return jsonify({"error": "content_id not found"}), 404
+
+    # Only allow verification for human or uncertain content
+    attribution = entries[idx]["attribution"]
+    if attribution == "likely_ai":
+        return jsonify({
+            "error": "Provenance certificate not available for content classified as likely_ai. "
+                     "Please submit an appeal first if you believe this is incorrect."
+        }), 403
+
+    # Issue the certificate
+    certificate = {
+        "certified": True,
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "verification_statement": statement,
+        "badge": "✓ Verified Human-Written",
+    }
+
+    entries[idx]["provenance_certificate"] = certificate
+    write_log(entries)
+
+    return jsonify({
+        "content_id": content_id,
+        "badge": "✓ Verified Human-Written",
+        "issued_at": certificate["issued_at"],
+        "message": "Your provenance certificate has been issued and attached to this content.",
+        "certificate": certificate,
+    })
+
 if __name__ == "__main__":
     app.run(debug=True)
