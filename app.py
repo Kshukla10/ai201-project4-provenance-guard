@@ -47,6 +47,14 @@ def append_entry(entry):
     write_log(entries)
 
 
+def find_entry(content_id):
+    entries = read_log()
+    for i, entry in enumerate(entries):
+        if entry["content_id"] == content_id:
+            return i, entries
+    return None, entries
+
+
 # ── Signal 1: Groq LLM classifier ─────────────────────────────────
 
 def groq_signal(text):
@@ -72,7 +80,6 @@ Text to analyze:
 
     raw = response.choices[0].message.content.strip()
 
-    # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -81,7 +88,7 @@ Text to analyze:
 
     result = json.loads(raw)
     score = float(result["ai_probability"])
-    return max(0.0, min(1.0, score))  # clamp to [0, 1]
+    return max(0.0, min(1.0, score))
 
 
 # ── Signal 2: Stylometric heuristics ──────────────────────────────
@@ -90,47 +97,33 @@ def stylo_signal(text):
     """
     Measures structural/statistical properties of the text.
     Returns a float from 0.0 (human) to 1.0 (AI).
-    AI text tends to be more uniform; human text more variable.
     """
-    # Split into sentences
     sentences = re.split(r'[.!?]+', text)
     sentences = [s.strip() for s in sentences if s.strip()]
 
     if len(sentences) < 2:
-        return 0.5  # not enough data, return uncertain
+        return 0.5
 
-    # --- Metric 1: Sentence length variance ---
-    # AI text tends to have similar sentence lengths
+    # Metric 1: Sentence length variance
     lengths = [len(s.split()) for s in sentences]
     mean_len = sum(lengths) / len(lengths)
     variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
     std_dev = math.sqrt(variance)
-
-    # Low std_dev = uniform = more AI-like
-    # Normalize: std_dev of 8+ is very human, 2 or less is very AI
     length_score = max(0.0, min(1.0, 1.0 - (std_dev / 8.0)))
 
-    # --- Metric 2: Type-token ratio (vocabulary diversity) ---
+    # Metric 2: Type-token ratio
     words = re.findall(r'\b[a-z]+\b', text.lower())
     if len(words) == 0:
         return 0.5
     ttr = len(set(words)) / len(words)
-
-    # High TTR = diverse vocabulary = more human
-    # Normalize: TTR > 0.8 is very human, < 0.5 is more AI-like
     ttr_score = max(0.0, min(1.0, 1.0 - ((ttr - 0.5) / 0.3)))
 
-    # --- Metric 3: Punctuation density ---
-    # Human writing uses more varied punctuation
+    # Metric 3: Punctuation density
     punct_chars = set('",;:—–()[]{}\'\"')
     punct_count = sum(1 for c in text if c in punct_chars)
     punct_density = punct_count / max(len(text), 1)
-
-    # Low punctuation density = more AI-like
-    # Normalize: density > 0.05 is human-like, < 0.01 is AI-like
     punct_score = max(0.0, min(1.0, 1.0 - (punct_density / 0.05)))
 
-    # Combine three metrics equally
     stylo_score = (length_score + ttr_score + punct_score) / 3.0
     return round(stylo_score, 4)
 
@@ -138,11 +131,6 @@ def stylo_signal(text):
 # ── Confidence scorer ──────────────────────────────────────────────
 
 def compute_confidence(llm_score, stylo_score):
-    """
-    Combines both signals into a single confidence score.
-    LLM gets 60% weight, stylometrics 40%.
-    Returns a float from 0.0 (human) to 1.0 (AI).
-    """
     return round((llm_score * 0.6) + (stylo_score * 0.4), 4)
 
 
@@ -153,6 +141,49 @@ def get_attribution(confidence):
         return "likely_human"
     else:
         return "uncertain"
+
+
+# ── Transparency label generator ───────────────────────────────────
+
+def generate_label(attribution, confidence):
+    pct = round(confidence * 100)
+
+    if attribution == "likely_ai" and confidence >= 0.75:
+        return (
+            f"AI-Generated Content — "
+            f"Our analysis strongly suggests this piece was AI-generated "
+            f"(confidence: {pct}%). "
+            f"If you are the creator and believe this is incorrect, "
+            f"you can submit an appeal."
+        )
+    elif attribution == "likely_ai":
+        return (
+            f"Likely AI-Generated — "
+            f"Our analysis suggests this piece may be AI-generated, "
+            f"though we are not certain (confidence: {pct}%). "
+            f"If you are the creator and believe this is incorrect, "
+            f"you can submit an appeal."
+        )
+    elif attribution == "likely_human" and confidence <= 0.25:
+        return (
+            f"Human-Written Content — "
+            f"Our analysis strongly suggests this piece was written "
+            f"by a human (confidence: {pct}%)."
+        )
+    elif attribution == "likely_human":
+        return (
+            f"Likely Human-Written — "
+            f"Our analysis suggests this piece was probably written "
+            f"by a human (confidence: {pct}%)."
+        )
+    else:
+        return (
+            f"Attribution Uncertain — "
+            f"We were unable to confidently determine whether this piece "
+            f"was written by a human or generated by AI (confidence: {pct}%). "
+            f"The author has not been flagged and this content remains fully visible. "
+            f"Creators may submit an appeal to provide additional context."
+        )
 
 
 # ── Routes ─────────────────────────────────────────────────────────
@@ -173,14 +204,11 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    # Both signals
     llm_score = groq_signal(text)
     stylo_score = stylo_signal(text)
-
-    # Combined confidence
     confidence = compute_confidence(llm_score, stylo_score)
     attribution = get_attribution(confidence)
-    label = f"[Placeholder label — confidence {confidence}]"
+    label = generate_label(attribution, confidence)
 
     entry = {
         "content_id": content_id,
@@ -200,6 +228,36 @@ def submit():
         "attribution": attribution,
         "confidence": confidence,
         "label": label,
+    })
+
+
+@app.route("/appeal", methods=["POST"])
+def appeal():
+    data = request.get_json()
+
+    if not data or "content_id" not in data or "creator_reasoning" not in data:
+        return jsonify({"error": "Request must include 'content_id' and 'creator_reasoning'"}), 400
+
+    content_id = data["content_id"]
+    reasoning = data["creator_reasoning"].strip()
+
+    if not reasoning:
+        return jsonify({"error": "creator_reasoning cannot be empty"}), 400
+
+    idx, entries = find_entry(content_id)
+
+    if idx is None:
+        return jsonify({"error": "content_id not found"}), 404
+
+    entries[idx]["status"] = "under_review"
+    entries[idx]["appeal_reasoning"] = reasoning
+    entries[idx]["appeal_timestamp"] = datetime.now(timezone.utc).isoformat()
+    write_log(entries)
+
+    return jsonify({
+        "content_id": content_id,
+        "status": "under_review",
+        "message": "Your appeal has been received and logged. A human reviewer will assess your submission.",
     })
 
 
